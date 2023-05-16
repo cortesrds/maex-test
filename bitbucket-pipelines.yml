@@ -1,0 +1,178 @@
+---
+image: node:18-slim
+
+definitions:
+  steps:
+    - step: &install-step
+        name: install
+        script:
+          - apt-get -qq update && apt-get -qq install -y python3 make gcc g++ git
+          - npm ci
+          - git submodule update --init
+        artifacts:
+          - node_modules/**
+        caches:
+          - npm
+    - step: &style-step
+        name: style
+        script:
+          - npm run style
+    - step: &lint-step
+        name: lint
+        script:
+          - npm run lint
+    - step: &openapi-step
+        name: openapi
+        script:
+          - apt-get -qq update && apt-get -qq install -y git
+          - git submodule update --init
+          - npm run codegen-openapi
+          - git diff --exit-code HEAD
+    - step: &build-step-development
+        name: build
+        script:
+          - apt-get -qq update && apt-get -qq install -y git
+          - git submodule update --init
+          - npm run build:development
+        artifacts:
+          - dist/**
+    - step: &build-step-staging
+        name: build
+        script:
+          - apt-get -qq update && apt-get -qq install -y git
+          - git submodule update --init
+          - npm run build:staging
+        artifacts:
+          - dist/**
+    - step: &build-step-production
+        name: build
+        script:
+          - apt-get -qq update && apt-get -qq install -y git
+          - git submodule update --init
+          - npm run build:production
+        artifacts:
+          - dist/**
+    - step: &build-step
+        name: build
+        script:
+          - apt-get -qq update && apt-get -qq install -y git
+          - git submodule update --init
+          - npm run build
+        artifacts:
+          - dist/**
+    # - step: &test-step
+    #     name: test
+    #     script:
+    #       - npm run test:coverage
+    #     artifacts:
+    #       - test-results/**
+    - step: &release-step
+        name: release
+        script:
+          - apt-get -qq update && apt-get -qq install -y git openssh
+          - npm run release
+        artifacts:
+          download: false
+    - step: &release-step
+        name: release
+        deployment: production
+        script:
+          - apt-get -qq update && apt-get -qq install -y git
+          - git submodule update --init
+          - export GIT_AUTHOR_NAME="Continuous Integration"
+          - export GIT_AUTHOR_EMAIL="devops@tapdo.io"
+          - export GIT_COMMITTER_NAME="Continuous Integration"
+          - export GIT_COMMITTER_EMAIL="devops@tapdo.io"
+          # to be able to push to bitbucket on a repo with branch restrictions, we have to use an app password with the ci user
+          # see https://support.atlassian.com/bitbucket-cloud/docs/push-back-to-your-repository/#App-secret
+          - git remote set-url origin https://tapdo_jenkins:${BITBUCKET_APP_SECRET}@bitbucket.org/${BITBUCKET_REPO_OWNER}/${BITBUCKET_REPO_SLUG}
+          - npm run release
+        artifacts:
+          download: false
+  caches:
+    npm: $HOME/.npm
+
+  services:
+    docker:
+      memory: 3072
+
+pipelines:
+  pull-requests:
+    '**':
+      - step: *install-step
+      - parallel:
+          # - step: *style-step
+          # - step: *lint-step
+          - step: *build-step-production
+          - step: *openapi-step
+          # - step: *test-step
+
+  branches:
+    develop:
+      - step: *install-step
+      - parallel:
+          # - step: *style-step
+          # - step: *lint-step
+          - step: *build-step-development
+          - step: *openapi-step
+          # - step: *test-step
+      - step:
+          name: deploy
+          size: 2x
+          deployment: development
+          script:
+            - pipe: microsoft/azure-static-web-apps-deploy:main
+              variables:
+                APP_LOCATION: '$BITBUCKET_CLONE_DIR'
+                OUTPUT_LOCATION: '$BITBUCKET_CLONE_DIR/dist'
+                API_TOKEN: $DEPLOYMENT_TOKEN
+                CONFIG_FILE_LOCATION: '$BITBUCKET_CLONE_DIR'
+                APP_BUILD_COMMAND: 'npm run build:development'
+          artifacts:
+            download: false
+
+    staging:
+      - step: *install-step
+      - parallel:
+          # - step: *style-step
+          # - step: *lint-step
+          - step: *build-step-staging
+          - step: *openapi-step
+          # - step: *test-step
+      - step:
+          name: deploy
+          size: 2x
+          deployment: staging
+          script:
+            - pipe: microsoft/azure-static-web-apps-deploy:main
+              variables:
+                APP_LOCATION: '$BITBUCKET_CLONE_DIR'
+                OUTPUT_LOCATION: '$BITBUCKET_CLONE_DIR/dist'
+                API_TOKEN: $DEPLOYMENT_TOKEN
+                CONFIG_FILE_LOCATION: '$BITBUCKET_CLONE_DIR'
+                APP_BUILD_COMMAND: 'npm run build:staging'
+          artifacts:
+            download: false
+
+    main:
+      - step: *install-step
+      - parallel:
+          # - step: *style-step
+          # - step: *lint-step
+          - step: *build-step-production
+          - step: *openapi-step
+          # - step: *test-step
+      - step:
+          name: deploy
+          size: 2x
+          deployment: production
+          script:
+            - pipe: microsoft/azure-static-web-apps-deploy:main
+              variables:
+                APP_LOCATION: '$BITBUCKET_CLONE_DIR'
+                OUTPUT_LOCATION: '$BITBUCKET_CLONE_DIR/dist'
+                API_TOKEN: $DEPLOYMENT_TOKEN
+                CONFIG_FILE_LOCATION: '$BITBUCKET_CLONE_DIR'
+                APP_BUILD_COMMAND: 'npm run build:production'
+          artifacts:
+            download: false

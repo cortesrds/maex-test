@@ -1,0 +1,3 @@
+[submodule "maex-openapi"]
+	path = maex-openapi
+	url = git@bitbucket.org:odpat7/maex-openapi.git
