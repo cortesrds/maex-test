@@ -6,6 +6,7 @@ interface Props {
 }
 
 function SiteList({ sites }: Props) {
+  console.log(sites)
 
   return (
     <>
